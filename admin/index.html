@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>DriveTap Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+  <div id="demo-banner" class="demo-banner hidden">DEMO DATA — nothing here is real, writes are disabled</div>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">D</span>
+        <div>
+          <div class="brand-name">DriveTap</div>
+          <div class="brand-sub">Admin Suite</div>
+        </div>
+      </div>
+      <nav id="nav"></nav>
+      <div class="sidebar-foot">
+        <a class="nav-item" href="?demo=1" target="_blank">▶ Demo mode</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h1 id="section-title">Overview</h1>
+        <div id="identity"></div>
+      </header>
+      <div id="content" class="content"></div>
+    </main>
+  </div>
+
+  <div id="auth-overlay" class="auth-overlay">
+    <div class="auth-card">
+      <div class="brand big">
+        <span class="brand-mark">D</span>
+        <div>
+          <div class="brand-name">DriveTap</div>
+          <div class="brand-sub">Admin Suite</div>
+        </div>
+      </div>
+      <p>Sign in with an admin account to continue. Non-admin accounts are rejected — access is enforced server-side by Firestore rules.</p>
+      <button id="google-signin" class="btn primary">Continue with Google</button>
+      <p id="auth-status" class="auth-status"></p>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
