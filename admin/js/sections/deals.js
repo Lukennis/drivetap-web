@@ -133,19 +133,32 @@ function openDealDrawer(deal, host) {
           class: "btn primary",
           onclick: async () => {
             if (!d.name?.trim()) { toast("Name it first", "warn"); return; }
-            const wasSigned = deal?.stage === "signed";
-            await saveDeal(d);
-            // Signing a deal spawns a partner org + onboarding checklist.
-            if (d.stage === "signed" && !wasSigned) {
-              const orgId = await savePartnerOrg({
-                name: d.name, contactName: d.contactName ?? "", contactEmail: d.contactEmail ?? "",
-                seats: Number(d.students) || 0, seatsUsed: 0, pricePerSeat: 0,
-                status: "onboarding", signedAt: new Date(), prospectId: d.id ?? null,
-              });
-              for (let i = 0; i < DEFAULT_ONBOARDING.length; i++) {
-                await saveOnboardingItem({ orgId, title: DEFAULT_ONBOARDING[i], done: i === 0, order: i + 1 });
+            const savedId = await saveDeal(d);
+            // A signed deal must ALWAYS have a partner org, and the contact's
+            // email must be on the portal access list from the start —
+            // otherwise the school's own contact can't sign in.
+            if (d.stage === "signed") {
+              const orgs = await loadPartnerOrgs();
+              const existing = orgs.find((o) => o.prospectId === (d.id ?? savedId))
+                || orgs.find((o) => (o.name || "").toLowerCase() === (d.name || "").toLowerCase());
+              const contactEmail = (d.contactEmail || "").trim().toLowerCase();
+              if (!existing) {
+                const orgId = await savePartnerOrg({
+                  name: d.name, contactName: d.contactName ?? "", contactEmail: contactEmail,
+                  memberEmails: contactEmail ? [contactEmail] : [],
+                  seats: Number(d.students) || 0, seatsUsed: 0, pricePerSeat: 0,
+                  status: "onboarding", signedAt: new Date(), prospectId: d.id ?? savedId,
+                });
+                for (let i = 0; i < DEFAULT_ONBOARDING.length; i++) {
+                  await saveOnboardingItem({ orgId, title: DEFAULT_ONBOARDING[i], done: i === 0, order: i + 1 });
+                }
+                toast(`${d.name} signed — partner org created, ${contactEmail || "no email"} can sign in to the portal 🎉`);
+              } else if (contactEmail && !(existing.memberEmails || []).includes(contactEmail)) {
+                await savePartnerOrg({ id: existing.id, memberEmails: [...(existing.memberEmails || []), contactEmail] });
+                toast(`${contactEmail} added to ${existing.name}'s portal access`);
+              } else {
+                toast("Saved");
               }
-              toast(`${d.name} signed — partner org + onboarding checklist created 🎉`);
             } else {
               toast("Saved");
             }
@@ -266,28 +279,45 @@ function printQuote(q) {
 // ---- Partners & onboarding -----------------------------------------------
 
 async function renderPartners(container, host) {
-  const [orgs, requests] = await Promise.all([loadPartnerOrgs(), loadPartnerRequests()]);
+  let [orgs, requests] = await Promise.all([loadPartnerOrgs(), loadPartnerRequests()]);
+
+  // Self-heal orgs created before contact emails were auto-added to portal
+  // access: any org with a contact email but an empty access list gets its
+  // contact enrolled, so the school's own contact can always sign in.
+  let healed = 0;
+  for (const org of orgs) {
+    const contactEmail = (org.contactEmail || "").trim().toLowerCase();
+    if (contactEmail && !(org.memberEmails || []).length) {
+      await savePartnerOrg({ id: org.id, memberEmails: [contactEmail] });
+      healed += 1;
+    }
+  }
+  if (healed) {
+    toast(`Fixed portal access for ${healed} partner org${healed === 1 ? "" : "s"} (contact email enrolled)`);
+    invalidate("partnerOrgs");
+    orgs = await loadPartnerOrgs();
+  }
   const open = requests.filter((r) => r.status === "open");
-  clear(container).append(
-    open.length
-      ? el("div", { class: "card" },
-          el("h3", {}, `Open requests from schools (${open.length})`),
-          open.map((r) =>
-            el("div", { class: "check-row" },
-              el("div", { style: "flex:1" },
-                el("strong", {}, r.orgName ?? r.orgId),
-                el("div", { class: "kpi-note" }, `${r.type === "seats" ? `+${r.quantity} seats` : r.type} · ${r.requestedByEmail ?? ""} · ${fmtDate(r.createdAt)}`),
-              ),
-              el("button", { class: "btn small primary", onclick: async () => { await resolvePartnerRequest(r.id, "done"); toast("Marked done"); dealsSection.render(host); } }, "Done"),
-              el("button", { class: "btn small", onclick: async () => { await resolvePartnerRequest(r.id, "declined"); dealsSection.render(host); } }, "Decline"),
-            ),
+  const pieces = [];
+  if (open.length) {
+    pieces.push(el("div", { class: "card" },
+      el("h3", {}, `Open requests from schools (${open.length})`),
+      open.map((r) =>
+        el("div", { class: "check-row" },
+          el("div", { style: "flex:1" },
+            el("strong", {}, r.orgName ?? r.orgId),
+            el("div", { class: "kpi-note" }, `${r.type === "seats" ? `+${r.quantity} seats` : r.type} · ${r.requestedByEmail ?? ""} · ${fmtDate(r.createdAt)}`),
           ),
-        )
-      : null,
-    orgs.length === 0
-      ? el("div", { class: "card" }, el("h3", {}, "No partners yet"), el("p", { class: "card-sub" }, 'Move a pipeline deal to "Signed" and the partner org + onboarding checklist are created automatically.'))
-      : el("div", { class: "grid cols-2" }, orgs.map((org) => partnerCard(org, host))),
-  );
+          el("button", { class: "btn small primary", onclick: async () => { await resolvePartnerRequest(r.id, "done"); toast("Marked done"); dealsSection.render(host); } }, "Done"),
+          el("button", { class: "btn small", onclick: async () => { await resolvePartnerRequest(r.id, "declined"); dealsSection.render(host); } }, "Decline"),
+        ),
+      ),
+    ));
+  }
+  pieces.push(orgs.length === 0
+    ? el("div", { class: "card" }, el("h3", {}, "No partners yet"), el("p", { class: "card-sub" }, 'Move a pipeline deal to "Signed" and the partner org + onboarding checklist are created automatically.'))
+    : el("div", { class: "grid cols-2" }, orgs.map((org) => partnerCard(org, host))));
+  clear(container).append(...pieces);
 }
 
 function partnerCard(org, host) {
