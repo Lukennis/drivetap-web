@@ -10,8 +10,8 @@
 // ARR here is exact per plan (gross, before Apple's commission). appConfig can
 // override prices via planPrices: { productId: yearlyUSD } if ASC pricing
 // changes.
-import { loadUsers, loadTrips, loadAppConfig } from "../data.js";
-import { el, clear, fmtMoney, fmtPct, monthKey } from "../util.js";
+import { loadUsers, loadTrips, loadAppConfig, saveConfigValues, invalidate } from "../data.js";
+import { el, clear, fmtMoney, fmtPct, monthKey, toast } from "../util.js";
 
 const DEFAULT_PLAN_PRICES = {
   "drivetap.unlimited.yearly": 9.99,
@@ -146,9 +146,66 @@ export const revenueSection = {
           ),
         ),
       ),
+      priceEditorCard(config, prices, host),
     );
   },
 };
+
+/// Editable per-plan prices. App Store Connect is the source of truth for what
+/// customers actually pay — set these to match it exactly. Saved to
+/// appConfig.planPrices (audit-logged); blank/default values fall back to the
+/// built-in table.
+function priceEditorCard(config, activePrices, host) {
+  const overrides = config.planPrices || {};
+  const inputs = new Map();
+  const rows = Object.keys(DEFAULT_PLAN_PRICES).map((plan) => {
+    const input = el("input", { type: "number", step: "0.01", min: "0", value: String(activePrices[plan]), style: "width:100px" });
+    inputs.set(plan, input);
+    return el("tr", {},
+      el("td", {}, el("strong", {}, PLAN_LABELS[plan]), el("div", { class: "kpi-note" }, plan)),
+      el("td", {}, input, " ", el("span", { class: "kpi-note" }, "$/yr")),
+      el("td", {}, overrides[plan] != null
+        ? el("span", { class: "badge blue" }, "custom")
+        : el("span", { class: "badge gray" }, "default")),
+    );
+  });
+
+  return el("div", { class: "card table-wrap" },
+    el("h3", {}, "Plan prices"),
+    el("p", { class: "card-sub" }, "Set these to EXACTLY what App Store Connect charges (gross, yearly). All revenue math above updates instantly and the change is audit-logged."),
+    el("table", {},
+      el("thead", {}, el("tr", {}, el("th", {}, "Plan"), el("th", {}, "Price / year"), el("th", {}, "Source"))),
+      el("tbody", {}, rows),
+    ),
+    el("div", { class: "toolbar", style: "margin-top:12px" },
+      el("button", {
+        class: "btn primary",
+        onclick: async () => {
+          const planPrices = {};
+          for (const [plan, input] of inputs) {
+            const value = Number(input.value);
+            if (!Number.isFinite(value) || value < 0) { toast(`Bad price for ${PLAN_LABELS[plan]}`, "error"); return; }
+            planPrices[plan] = Math.round(value * 100) / 100;
+          }
+          const detail = Object.entries(planPrices).map(([p, v]) => `${PLAN_LABELS[p]}=$${v}`).join(", ");
+          await saveConfigValues({ planPrices }, `Plan prices set: ${detail}`);
+          toast("Prices saved — revenue recalculated");
+          invalidate("appConfig");
+          revenueSection.render(host);
+        },
+      }, "Save prices"),
+      el("button", {
+        class: "btn",
+        onclick: async () => {
+          await saveConfigValues({ planPrices: undefined }, "Plan prices reset to built-in defaults");
+          toast("Reset to defaults");
+          invalidate("appConfig");
+          revenueSection.render(host);
+        },
+      }, "Reset to defaults"),
+    ),
+  );
+}
 
 function kpi(label, value, note) {
   return el("div", { class: "card kpi" },

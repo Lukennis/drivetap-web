@@ -8,6 +8,7 @@
 import { auth, db } from "../../admin/js/firebase-init.js";
 import {
   GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut,
+  setPersistence, browserLocalPersistence,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   collection, getDocs, query, where, addDoc, serverTimestamp,
@@ -39,18 +40,27 @@ if (isDemo) {
   renderShellIdentity();
   renderPortal();
 } else {
-  document.getElementById("google-signin").addEventListener("click", async () => {
+  const signInBtn = document.getElementById("google-signin");
+  signInBtn.classList.add("hidden");
+  authStatus.textContent = "Restoring session…";
+  setPersistence(auth, browserLocalPersistence).catch(() => {});
+
+  signInBtn.addEventListener("click", async () => {
     authStatus.textContent = "";
     try {
       await signInWithPopup(auth, new GoogleAuthProvider());
     } catch (err) {
-      authStatus.textContent = err.message;
+      authStatus.textContent = (err.code || "").includes("unauthorized-domain")
+        ? "This domain isn't authorized for sign-in yet — your DriveTap contact needs to enable it."
+        : err.message;
     }
   });
 
   onAuthStateChanged(auth, async (user) => {
     if (!user) {
       overlay.classList.remove("hidden");
+      signInBtn.classList.remove("hidden");
+      if (authStatus.textContent === "Restoring session…") authStatus.textContent = "";
       return;
     }
     state.staffEmail = (user.email || "").toLowerCase();
