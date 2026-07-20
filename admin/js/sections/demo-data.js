@@ -28,7 +28,7 @@ const users = names.map(([first, last], i) => ({
   lifetimeTripCount: 8 + i * 3,
   requiredHoursGoal: 50,
   requiredNightHoursGoal: 10,
-  partnerOrgId: i < 6 && i % 4 !== 3 ? "o1" : null,
+  partnerOrgId: i < 6 && i % 4 !== 3 ? "o1" : (i >= 8 && i % 4 !== 3 ? "o2" : null),
   createdAt: new Date(now - (80 - i * 6) * day),
   updatedAt: new Date(now - i * day),
 }));
@@ -98,6 +98,7 @@ const quotes = [
 
 const partnerOrgs = [
   { id: "o1", name: "Buckeye Driving School", contactName: "Dan Kovacs", contactEmail: "dan@buckeyedriving.com", memberEmails: ["dan@buckeyedriving.com", "office@buckeyedriving.com"], seats: 95, seatsUsed: 41, pricePerSeat: 4.5, status: "onboarding", signedAt: new Date(now - 8 * day), createdAt: new Date(now - 8 * day) },
+  { id: "o2", name: "Buckeye Driving — Westerville", contactName: "Dan Kovacs", contactEmail: "dan@buckeyedriving.com", memberEmails: ["dan@buckeyedriving.com"], seats: 40, seatsUsed: 9, pricePerSeat: 4.5, status: "live", signedAt: new Date(now - 30 * day), createdAt: new Date(now - 30 * day) },
 ];
 
 const onboarding = [

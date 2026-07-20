@@ -19,7 +19,7 @@ import {
 import { demoDataset } from "../../admin/js/sections/demo-data.js";
 
 const isDemo = new URLSearchParams(location.search).has("demo");
-const state = { org: null, students: [], tripsByStudent: new Map(), staffEmail: null };
+const state = { org: null, orgs: [], students: [], tripsByStudent: new Map(), staffEmail: null };
 
 const snapToObj = (snap) => ({ id: snap.id, ...snap.data() });
 
@@ -31,14 +31,11 @@ const authStatus = document.getElementById("auth-status");
 if (isDemo) {
   document.getElementById("demo-banner").classList.remove("hidden");
   state.staffEmail = "dan@buckeyedriving.com";
-  state.org = demoDataset.partnerOrgs[0];
-  state.students = demoDataset.users.filter((u) => u.partnerOrgId === state.org.id);
-  for (const s of state.students) {
-    state.tripsByStudent.set(s.id, demoDataset.trips.filter((t) => t.userId === s.id));
-  }
+  state.orgs = demoDataset.partnerOrgs.filter((o) => (o.memberEmails || []).includes(state.staffEmail));
+  state.org = state.orgs[0];
   overlay.classList.add("hidden");
   renderShellIdentity();
-  renderPortal();
+  loadRoster().then(renderPortal);
 } else {
   const signInBtn = document.getElementById("google-signin");
   signInBtn.classList.add("hidden");
@@ -75,7 +72,12 @@ if (isDemo) {
         await signOut(auth);
         return;
       }
-      state.org = snapToObj(orgSnap.docs[0]);
+      // One email can be registered with several schools (district staff, an
+      // owner with two locations, DriveTap's own account). Load them ALL and
+      // open on the last one used; the header becomes a school switcher.
+      state.orgs = orgSnap.docs.map(snapToObj).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      const remembered = localStorage.getItem(`dt-portal-org-${state.staffEmail}`);
+      state.org = state.orgs.find((o) => o.id === remembered) || state.orgs[0];
       overlay.classList.add("hidden");
       renderShellIdentity();
       await loadRoster();
@@ -87,6 +89,11 @@ if (isDemo) {
 }
 
 async function loadRoster() {
+  if (isDemo) {
+    state.students = demoDataset.users.filter((u) => u.partnerOrgId === state.org.id);
+    state.tripsByStudent = new Map(state.students.map((s) => [s.id, demoDataset.trips.filter((t) => t.userId === s.id)]));
+    return;
+  }
   const studentSnap = await getDocs(query(collection(db, "users"), where("partnerOrgId", "==", state.org.id)));
   state.students = studentSnap.docs.map(snapToObj)
     .sort((a, b) => `${a.firstName}${a.lastName}`.localeCompare(`${b.firstName}${b.lastName}`));
@@ -101,12 +108,37 @@ async function loadRoster() {
 
 function renderShellIdentity() {
   const orgLabel = document.getElementById("org-label");
-  clear(orgLabel).append(el("span", {}, "Partner school"), el("strong", {}, state.org.name));
+  clear(orgLabel);
+  if (state.orgs.length > 1) {
+    orgLabel.append(
+      el("span", {}, `Partner school (${state.orgs.length} linked)`),
+      el("select", {
+        style: "margin-top:2px; font-weight:600",
+        onchange: (e) => switchOrg(e.target.value),
+      }, state.orgs.map((o) => el("option", { value: o.id, ...(o.id === state.org.id ? { selected: "" } : {}) }, o.name))),
+    );
+  } else {
+    orgLabel.append(el("span", {}, "Partner school"), el("strong", {}, state.org.name));
+  }
   const identity = document.getElementById("identity");
   clear(identity).append(
     el("span", { class: "kpi-note" }, state.staffEmail ?? ""),
     isDemo ? "" : el("button", { class: "link-btn", onclick: () => signOut(auth).then(() => location.reload()) }, "Sign out"),
   );
+}
+
+async function switchOrg(orgId) {
+  const next = state.orgs.find((o) => o.id === orgId);
+  if (!next || next.id === state.org?.id) return;
+  state.org = next;
+  localStorage.setItem(`dt-portal-org-${state.staffEmail}`, next.id);
+  state.students = [];
+  state.tripsByStudent = new Map();
+  const host = document.getElementById("portal-content");
+  clear(host).append(el("div", { class: "card" }, el("p", { class: "card-sub" }, `Loading ${next.name}…`)));
+  await loadRoster();
+  renderShellIdentity();
+  renderPortal();
 }
 
 // ---- Aggregates ----------------------------------------------------------
