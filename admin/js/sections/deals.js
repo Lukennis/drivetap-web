@@ -4,6 +4,7 @@
 import {
   loadDeals, saveDeal, deleteDeal, loadQuotes, saveQuote,
   loadPartnerOrgs, savePartnerOrg, loadOnboarding, saveOnboardingItem, invalidate,
+  loadPartnerRequests, resolvePartnerRequest,
 } from "../data.js";
 import { el, clear, fmtDate, fmtMoney, toDate, toast } from "../util.js";
 
@@ -265,8 +266,24 @@ function printQuote(q) {
 // ---- Partners & onboarding -----------------------------------------------
 
 async function renderPartners(container, host) {
-  const orgs = await loadPartnerOrgs();
+  const [orgs, requests] = await Promise.all([loadPartnerOrgs(), loadPartnerRequests()]);
+  const open = requests.filter((r) => r.status === "open");
   clear(container).append(
+    open.length
+      ? el("div", { class: "card" },
+          el("h3", {}, `Open requests from schools (${open.length})`),
+          open.map((r) =>
+            el("div", { class: "check-row" },
+              el("div", { style: "flex:1" },
+                el("strong", {}, r.orgName ?? r.orgId),
+                el("div", { class: "kpi-note" }, `${r.type === "seats" ? `+${r.quantity} seats` : r.type} · ${r.requestedByEmail ?? ""} · ${fmtDate(r.createdAt)}`),
+              ),
+              el("button", { class: "btn small primary", onclick: async () => { await resolvePartnerRequest(r.id, "done"); toast("Marked done"); dealsSection.render(host); } }, "Done"),
+              el("button", { class: "btn small", onclick: async () => { await resolvePartnerRequest(r.id, "declined"); dealsSection.render(host); } }, "Decline"),
+            ),
+          ),
+        )
+      : null,
     orgs.length === 0
       ? el("div", { class: "card" }, el("h3", {}, "No partners yet"), el("p", { class: "card-sub" }, 'Move a pipeline deal to "Signed" and the partner org + onboarding checklist are created automatically.'))
       : el("div", { class: "grid cols-2" }, orgs.map((org) => partnerCard(org, host))),
@@ -285,12 +302,47 @@ function partnerCard(org, host) {
     el("dl", { class: "kv" },
       el("dt", {}, "Seats"), el("dd", {}, `${org.seatsUsed ?? 0} used of ${org.seats ?? 0}`),
       el("dt", {}, "Price"), el("dd", {}, org.pricePerSeat ? `${fmtMoney(org.pricePerSeat)}/seat/mo · ${fmtMoney((org.seats || 0) * org.pricePerSeat)}/mo` : "not set"),
+      el("dt", {}, "Portal staff"), el("dd", {}, (org.memberEmails || []).length ? (org.memberEmails || []).join(", ") : "none — portal locked"),
     ),
+    partnerEditBlock(org, host),
   );
   const listHost = el("div", { style: "margin-top:10px" }, el("p", { class: "card-sub" }, "Loading checklist…"));
   card.append(listHost);
   loadOnboarding(org.id).then((items) => renderChecklist(listHost, org, items, host));
   return card;
+}
+
+/// Seats, per-seat price, and portal staff emails — the emails are the
+/// portal's access list: anyone signing in with one of these Google accounts
+/// sees this org's students. Server-enforced by Firestore rules.
+function partnerEditBlock(org, host) {
+  const seats = el("input", { type: "number", value: String(org.seats ?? 0), min: "0", style: "width:80px" });
+  const price = el("input", { type: "number", value: String(org.pricePerSeat ?? 0), step: "0.25", min: "0", style: "width:90px" });
+  const emails = el("textarea", { rows: 2, placeholder: "staff@school.com, office@school.com" }, (org.memberEmails || []).join(", "));
+  return el("details", { style: "margin-top:8px" },
+    el("summary", { style: "cursor:pointer; font-size:12.5px; color:var(--blue)" }, "Edit org (seats · price · portal staff)"),
+    el("div", { style: "margin-top:8px" },
+      el("div", { class: "toolbar" },
+        el("span", { class: "kpi-note" }, "Seats"), seats,
+        el("span", { class: "kpi-note" }, "$/seat/mo"), price,
+      ),
+      el("label", { class: "field" }, "Portal staff emails (comma-separated — these accounts can sign in to the school portal)", emails),
+      el("button", {
+        class: "btn small primary",
+        onclick: async () => {
+          const memberEmails = emails.value.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter((e) => e.includes("@"));
+          await savePartnerOrg({
+            id: org.id,
+            seats: Number(seats.value) || 0,
+            pricePerSeat: Number(price.value) || 0,
+            memberEmails,
+          });
+          toast("Org updated");
+          dealsSection.render(host);
+        },
+      }, "Save org"),
+    ),
+  );
 }
 
 function renderChecklist(hostNode, org, items, host) {

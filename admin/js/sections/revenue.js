@@ -1,9 +1,33 @@
-// Revenue & business analytics. Honest by construction: Apple owns the real
-// money numbers (App Store Connect); this view derives what Firestore can
-// truthfully show — subscriber counts, conversion, cohorts — and labels the
-// MRR figure as an estimate driven by an editable price assumption.
+// Revenue & business analytics — real plan pricing.
+//
+// DriveTap sells YEARLY subscriptions (App Store Connect / DriveTap.storekit):
+//   drivetap.unlimited.yearly     $9.99/yr  (1 teen)
+//   drivetap.unlimited.yearly.t2  $16.98/yr (2 teens)
+//   drivetap.unlimited.yearly.t3  $23.97/yr (3 teens)
+//   drivetap.unlimited.yearly.t4  $30.96/yr (4 teens)
+//   drivetap.unlimited.yearly.t5  $37.95/yr (5 teens)
+// The iOS app stamps subscriptionProductId on each subscriber's user doc, so
+// ARR here is exact per plan (gross, before Apple's commission). appConfig can
+// override prices via planPrices: { productId: yearlyUSD } if ASC pricing
+// changes.
 import { loadUsers, loadTrips, loadAppConfig } from "../data.js";
-import { el, clear, fmtMoney, fmtPct, monthKey, toDate } from "../util.js";
+import { el, clear, fmtMoney, fmtPct, monthKey } from "../util.js";
+
+const DEFAULT_PLAN_PRICES = {
+  "drivetap.unlimited.yearly": 9.99,
+  "drivetap.unlimited.yearly.t2": 16.98,
+  "drivetap.unlimited.yearly.t3": 23.97,
+  "drivetap.unlimited.yearly.t4": 30.96,
+  "drivetap.unlimited.yearly.t5": 37.95,
+};
+const BASE_PLAN = "drivetap.unlimited.yearly";
+const PLAN_LABELS = {
+  "drivetap.unlimited.yearly": "1 teen",
+  "drivetap.unlimited.yearly.t2": "2 teens",
+  "drivetap.unlimited.yearly.t3": "3 teens",
+  "drivetap.unlimited.yearly.t4": "4 teens",
+  "drivetap.unlimited.yearly.t5": "5 teens",
+};
 
 export const revenueSection = {
   id: "revenue",
@@ -12,15 +36,26 @@ export const revenueSection = {
   async render(host) {
     const [users, trips, config] = await Promise.all([loadUsers(), loadTrips(), loadAppConfig()]);
     const excluded = new Set(config.revenueExcludedUserIds || []);
+    const prices = { ...DEFAULT_PLAN_PRICES, ...(config.planPrices || {}) };
 
     const real = users.filter((u) => !u.isTester && !excluded.has(u.id) && !u.isAdmin);
     const paying = real.filter((u) => u.hasPremium && u.premiumSource === "storekit");
-    const granted = users.filter((u) => u.hasPremium && u.premiumSource !== "storekit");
+    const granted = users.filter((u) => u.hasPremium && u.premiumSource && u.premiumSource !== "storekit");
 
-    const priceAssumption = Number(localStorage.getItem("dt-price-assumption") || "6.99");
-    const mrr = paying.length * priceAssumption;
+    // Exact ARR: sum each payer's plan price; unknown plan → base plan price.
+    let arr = 0;
+    let unattributed = 0;
+    const byPlan = new Map();
+    for (const u of paying) {
+      const plan = u.subscriptionProductId && prices[u.subscriptionProductId] != null ? u.subscriptionProductId : null;
+      if (!plan) unattributed += 1;
+      const effective = plan ?? BASE_PLAN;
+      arr += prices[effective];
+      byPlan.set(effective, (byPlan.get(effective) || 0) + 1);
+    }
+    const mrr = arr / 12;
 
-    // Activation funnel: signed up → logged a drive → got an approval → paying.
+    // Activation funnel.
     const tripsByUser = new Map();
     for (const t of trips) {
       if (!tripsByUser.has(t.userId)) tripsByUser.set(t.userId, []);
@@ -35,7 +70,7 @@ export const revenueSection = {
       ["Paying", paying.length],
     ];
 
-    // Signup cohorts by month with paying share.
+    // Signup cohorts with paying share.
     const cohorts = new Map();
     for (const u of real) {
       const key = monthKey(u.createdAt);
@@ -47,7 +82,7 @@ export const revenueSection = {
     }
     const cohortKeys = [...cohorts.keys()].sort().slice(-12);
 
-    // State breakdown (top 8).
+    // State breakdown.
     const byState = new Map();
     for (const u of real) {
       const s = u.state || "Unknown";
@@ -58,25 +93,29 @@ export const revenueSection = {
     }
     const topStates = [...byState.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 8);
 
-    const priceInput = el("input", { type: "number", step: "0.01", value: String(priceAssumption), style: "width:90px" });
-    priceInput.addEventListener("change", () => {
-      localStorage.setItem("dt-price-assumption", priceInput.value);
-      revenueSection.render(host);
-    });
-
     clear(host).append(
       el("div", { class: "grid cols-4" },
         kpi("Paying subscribers", String(paying.length), "StoreKit · testers/excluded removed"),
-        kpi("Est. MRR", fmtMoney(mrr), `at ${fmtMoney(priceAssumption)}/mo avg — edit below`),
-        kpi("Est. ARR", fmtMoney(mrr * 12), "straight-line from MRR"),
+        kpi("ARR (gross)", fmtMoney(arr), unattributed ? `${unattributed} payer${unattributed === 1 ? "" : "s"} unattributed → counted at base $9.99` : "exact, per stamped plan"),
+        kpi("MRR equivalent", fmtMoney(mrr), "ARR ÷ 12 — plans bill yearly"),
         kpi("Paid conversion", fmtPct(real.length ? paying.length / real.length : 0, 1), `${granted.length} comp/linked premium excluded`),
       ),
-      el("div", { class: "card" },
-        el("h3", {}, "Assumption"),
-        el("p", { class: "card-sub" }, "Real billing lives in App Store Connect. This average net price per payer drives the MRR/ARR estimates:"),
-        el("div", { class: "toolbar" }, priceInput, el("span", { class: "kpi-note" }, "$ / payer / month (stored on this device)")),
-      ),
       el("div", { class: "grid cols-2" },
+        el("div", { class: "card table-wrap" },
+          el("h3", {}, "Plan mix"),
+          el("p", { class: "card-sub" }, "Yearly plans, gross price (Apple's commission not deducted). Override prices via appConfig.planPrices if ASC changes."),
+          byPlan.size === 0 ? el("p", { class: "card-sub" }, "No paying subscribers yet.") : el("table", {},
+            el("thead", {}, el("tr", {}, el("th", {}, "Plan"), el("th", {}, "Price/yr"), el("th", {}, "Subscribers"), el("th", {}, "ARR"))),
+            el("tbody", {}, [...byPlan.entries()].sort((a, b) => b[1] - a[1]).map(([plan, count]) =>
+              el("tr", {},
+                el("td", {}, el("strong", {}, PLAN_LABELS[plan] ?? plan), el("div", { class: "kpi-note" }, plan)),
+                el("td", {}, fmtMoney(prices[plan])),
+                el("td", {}, String(count)),
+                el("td", {}, fmtMoney(prices[plan] * count)),
+              ),
+            )),
+          ),
+        ),
         el("div", { class: "card" },
           el("h3", {}, "Activation funnel"),
           funnel.map(([label, count], i) =>
@@ -91,18 +130,20 @@ export const revenueSection = {
             ),
           ),
         ),
+      ),
+      el("div", { class: "grid cols-2" },
         chartCard("Signup cohorts — total vs paying", cohortKeys, [
           { label: "Signups", data: cohortKeys.map((k) => cohorts.get(k).total), backgroundColor: "#c3cbd9" },
           { label: "Paying", data: cohortKeys.map((k) => cohorts.get(k).paying), backgroundColor: "#00b2f0" },
         ]),
-      ),
-      el("div", { class: "card table-wrap" },
-        el("h3", {}, "By state"),
-        el("table", {},
-          el("thead", {}, el("tr", {}, el("th", {}, "State"), el("th", {}, "Accounts"), el("th", {}, "Paying"), el("th", {}, "Conversion"))),
-          el("tbody", {}, topStates.map(([s, row]) =>
-            el("tr", {}, el("td", {}, s), el("td", {}, String(row.total)), el("td", {}, String(row.paying)), el("td", {}, fmtPct(row.total ? row.paying / row.total : 0, 1))),
-          )),
+        el("div", { class: "card table-wrap" },
+          el("h3", {}, "By state"),
+          el("table", {},
+            el("thead", {}, el("tr", {}, el("th", {}, "State"), el("th", {}, "Accounts"), el("th", {}, "Paying"), el("th", {}, "Conversion"))),
+            el("tbody", {}, topStates.map(([s, row]) =>
+              el("tr", {}, el("td", {}, s), el("td", {}, String(row.total)), el("td", {}, String(row.paying)), el("td", {}, fmtPct(row.total ? row.paying / row.total : 0, 1))),
+            )),
+          ),
         ),
       ),
     );

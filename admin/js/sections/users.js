@@ -2,6 +2,7 @@
 // support deep-dive drawer (profile, subscription controls, drives, notes).
 import {
   loadUsers, loadTripsForUser, loadNotes, updateUserFields, addNote, deleteNote, invalidate, session,
+  loadPartnerOrgs,
 } from "../data.js";
 import {
   el, clear, fmtDate, fmtDateTime, fmtHours, fmtMiles, toDate, downloadCSV, toast, debounce, decodePolyline, escapeHTML,
@@ -200,9 +201,31 @@ function controlsCard(user, closeDrawer) {
       },
     }, label);
 
+  const orgRow = el("div", { class: "toolbar" }, el("span", { class: "kpi-note" }, "Loading partner orgs…"));
+  loadPartnerOrgs().then((orgs) => {
+    const select = el("select", {},
+      el("option", { value: "" }, "No partner org"),
+      orgs.map((o) => el("option", { value: o.id, ...(o.id === (user.partnerOrgId ?? "") ? { selected: "" } : {}) }, o.name)),
+    );
+    clear(orgRow).append(
+      el("span", { class: "kpi-note", style: "min-width:80px" }, "Partner org:"),
+      select,
+      el("button", {
+        class: "btn small",
+        onclick: async () => {
+          const orgId = select.value || null;
+          const orgName = orgs.find((o) => o.id === orgId)?.name ?? "none";
+          await updateUserFields(user.id, { partnerOrgId: orgId }, `Partner org → ${orgName} (web)`);
+          toast(`Partner org set: ${orgName}`);
+          closeDrawer();
+        },
+      }, "Save"),
+    );
+  });
+
   return el("div", { class: "card" },
     el("h3", {}, "Controls"),
-    el("p", { class: "card-sub" }, "Every action writes an audit entry, same as the in-app admin."),
+    el("p", { class: "card-sub" }, "Every action writes an audit entry, same as the in-app admin. Assigning a partner org lets that school's portal staff see this student's drives."),
     el("div", { class: "toolbar" },
       user.isTester
         ? action("Remove tester", { isTester: false }, "Tester flag removed (web)")
@@ -214,6 +237,7 @@ function controlsCard(user, closeDrawer) {
         ? action("Unsuspend", { isSuspended: false }, "Account unsuspended (web)")
         : action("Suspend", { isSuspended: true }, "Account suspended (web)", true),
     ),
+    orgRow,
   );
 }
 

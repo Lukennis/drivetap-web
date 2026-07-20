@@ -10,6 +10,8 @@ const names = [
 ];
 const states = ["Texas", "Texas", "Texas", "California", "Florida", "Ohio", "North Carolina", "Texas", "Georgia", "Iowa", "Texas", "Colorado"];
 
+const demoPlans = ["drivetap.unlimited.yearly", "drivetap.unlimited.yearly.t2", "drivetap.unlimited.yearly", "drivetap.unlimited.yearly.t3"];
+
 const users = names.map(([first, last], i) => ({
   id: `demo-user-${i}`,
   firstName: first,
@@ -19,12 +21,14 @@ const users = names.map(([first, last], i) => ({
   state: states[i],
   hasPremium: i % 3 === 0,
   premiumSource: i % 3 === 0 ? "storekit" : null,
+  subscriptionProductId: i % 3 === 0 ? demoPlans[(i / 3) % demoPlans.length | 0] : null,
   isTester: false,
   isSuspended: false,
   isAdmin: false,
   lifetimeTripCount: 8 + i * 3,
   requiredHoursGoal: 50,
   requiredNightHoursGoal: 10,
+  partnerOrgId: i < 6 && i % 4 !== 3 ? "o1" : null,
   createdAt: new Date(now - (80 - i * 6) * day),
   updatedAt: new Date(now - i * day),
 }));
@@ -93,7 +97,7 @@ const quotes = [
 ];
 
 const partnerOrgs = [
-  { id: "o1", name: "Buckeye Driving School", contactName: "Dan Kovacs", contactEmail: "dan@buckeyedriving.com", seats: 95, seatsUsed: 41, pricePerSeat: 4.5, status: "onboarding", signedAt: new Date(now - 8 * day), createdAt: new Date(now - 8 * day) },
+  { id: "o1", name: "Buckeye Driving School", contactName: "Dan Kovacs", contactEmail: "dan@buckeyedriving.com", memberEmails: ["dan@buckeyedriving.com", "office@buckeyedriving.com"], seats: 95, seatsUsed: 41, pricePerSeat: 4.5, status: "onboarding", signedAt: new Date(now - 8 * day), createdAt: new Date(now - 8 * day) },
 ];
 
 const onboarding = [

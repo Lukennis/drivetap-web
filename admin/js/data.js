@@ -253,6 +253,21 @@ export async function savePartnerOrg(org) {
   return ref.id;
 }
 
+export async function loadPartnerRequests() {
+  if (isDemo) return [];
+  return cached("partnerRequests", async () => {
+    const snap = await getDocs(collection(db, "partnerRequests"));
+    return snap.docs.map(snapToObj).sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0));
+  });
+}
+
+export async function resolvePartnerRequest(id, status) {
+  guardWrite();
+  await updateDoc(doc(db, "partnerRequests", id), { status, resolvedAt: serverTimestamp() });
+  await logAction("partner_request", "partnerRequest", id, `Request marked ${status}`);
+  invalidate("partnerRequests");
+}
+
 export async function saveOnboardingItem(item) {
   guardWrite();
   const { id, ...fields } = item;
