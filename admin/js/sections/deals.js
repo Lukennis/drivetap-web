@@ -4,9 +4,14 @@
 import {
   loadDeals, saveDeal, deleteDeal, loadQuotes, saveQuote,
   loadPartnerOrgs, savePartnerOrg, loadOnboarding, saveOnboardingItem, invalidate,
-  loadPartnerRequests, resolvePartnerRequest,
+  loadPartnerRequests, resolvePartnerRequest, loadAppConfig,
 } from "../data.js";
 import { el, clear, fmtDate, fmtMoney, toDate, toast } from "../util.js";
+
+/// The school portal lives next to the admin on the same host.
+function portalURL() {
+  return new URL("../portal/", location.href).href;
+}
 
 const STAGES = [
   ["lead", "Leads"],
@@ -314,13 +319,130 @@ async function renderPartners(container, host) {
       ),
     ));
   }
+  const config = await loadAppConfig();
+  pieces.unshift(el("div", { class: "toolbar" },
+    el("button", { class: "btn primary small", onclick: () => openSchoolDrawer(host) }, "+ New School"),
+    el("span", { class: "kpi-note" }, "Create a school directly — no pipeline deal needed. Invites are sent from your own email."),
+  ));
   pieces.push(orgs.length === 0
-    ? el("div", { class: "card" }, el("h3", {}, "No partners yet"), el("p", { class: "card-sub" }, 'Move a pipeline deal to "Signed" and the partner org + onboarding checklist are created automatically.'))
-    : el("div", { class: "grid cols-2" }, orgs.map((org) => partnerCard(org, host))));
+    ? el("div", { class: "card" }, el("h3", {}, "No partners yet"), el("p", { class: "card-sub" }, 'Use "+ New School", or move a pipeline deal to "Signed" — either way the org and onboarding checklist are created.'))
+    : el("div", { class: "grid cols-2" }, orgs.map((org) => partnerCard(org, host, config))));
   clear(container).append(...pieces);
 }
 
-function partnerCard(org, host) {
+// ---- Direct school creation ----------------------------------------------
+
+function openSchoolDrawer(host) {
+  const backdrop = el("div", { class: "drawer-backdrop", onclick: close });
+  const drawer = el("div", { class: "drawer" });
+  document.body.append(backdrop, drawer);
+  function close() { backdrop.remove(); drawer.remove(); }
+
+  const d = { seats: 25, pricePerSeat: 4.5, status: "onboarding", withChecklist: true };
+  const field = (label, key, type = "text", attrs = {}) => el("label", { class: "field" }, label,
+    el("input", { type, value: d[key] ?? "", ...attrs, oninput: (e) => { d[key] = type === "number" ? Number(e.target.value) : e.target.value; } }));
+  const staffEmails = el("textarea", { rows: 2, placeholder: "principal@school.com, office@school.com" });
+
+  drawer.append(
+    el("div", { class: "drawer-head" },
+      el("h2", {}, "New partner school"),
+      el("button", { class: "btn small", onclick: close }, "Close"),
+    ),
+    el("div", { class: "card" },
+      field("School name", "name"),
+      field("Contact name", "contactName"),
+      field("Contact email", "contactEmail", "email"),
+      el("label", { class: "field" }, "Portal staff emails (contact is added automatically; must be Google-sign-in accounts)", staffEmails),
+      field("Student seats", "seats", "number", { min: "0" }),
+      field("Price per seat / month ($)", "pricePerSeat", "number", { step: "0.25", min: "0" }),
+      el("label", { class: "field" }, "Status",
+        el("select", { onchange: (e) => { d.status = e.target.value; } },
+          el("option", { value: "onboarding", selected: "" }, "Onboarding"),
+          el("option", { value: "live" }, "Live"),
+        ),
+      ),
+      el("label", { class: "field", style: "display:flex; align-items:center; gap:8px" },
+        el("input", { type: "checkbox", checked: "", onchange: (e) => { d.withChecklist = e.target.checked; } }),
+        "Create the standard onboarding checklist",
+      ),
+      el("div", { class: "toolbar" },
+        el("button", {
+          class: "btn primary",
+          onclick: async () => {
+            if (!d.name?.trim()) { toast("School name first", "warn"); return; }
+            const contactEmail = (d.contactEmail || "").trim().toLowerCase();
+            const memberEmails = [...new Set([
+              contactEmail,
+              ...staffEmails.value.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()),
+            ].filter((e) => e.includes("@")))];
+            const orgId = await savePartnerOrg({
+              name: d.name.trim(), contactName: d.contactName ?? "", contactEmail,
+              memberEmails, seats: Number(d.seats) || 0, seatsUsed: 0,
+              pricePerSeat: Number(d.pricePerSeat) || 0,
+              status: d.status, signedAt: new Date(), prospectId: null,
+            });
+            if (d.withChecklist) {
+              for (let i = 0; i < DEFAULT_ONBOARDING.length; i++) {
+                await saveOnboardingItem({ orgId, title: DEFAULT_ONBOARDING[i], done: false, order: i + 1 });
+              }
+            }
+            toast(`${d.name} created — ${memberEmails.length} account${memberEmails.length === 1 ? "" : "s"} can sign in. Now send them the login link.`);
+            close();
+            dealsSection.render(host);
+          },
+        }, "Create school"),
+      ),
+    ),
+  );
+}
+
+// ---- Invite emails (open in the admin's own mail client) ------------------
+
+function loginInviteMailto(org) {
+  const to = (org.memberEmails || []).join(",");
+  const subject = `Your ${org.name} DriveTap portal is ready`;
+  const body = [
+    `Hi ${org.contactName || "there"},`,
+    "",
+    `Your DriveTap Partners portal for ${org.name} is live. You can see every enrolled student's supervised-driving progress, night hours, signature status, and export records any time.`,
+    "",
+    `Sign in here: ${portalURL()}`,
+    "",
+    `Use "Continue with Google" with this email address — access is already set up for: ${(org.memberEmails || []).join(", ")}.`,
+    "",
+    "Need another staff member added? Just reply to this email.",
+    "",
+    "— DriveTap",
+  ].join("\n");
+  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+function studentInviteMailto(org, appStoreURL) {
+  const subject = `Getting your student set up with DriveTap (${org.name})`;
+  const appLine = appStoreURL
+    ? `1. Download DriveTap: ${appStoreURL}`
+    : "1. Download DriveTap from the App Store (search \"DriveTap\")";
+  const body = [
+    `Hi ${org.contactName || "there"},`,
+    "",
+    `Here's the note to forward to your students' families to get them onto DriveTap under ${org.name}:`,
+    "",
+    "----------------------------------------",
+    `${org.name} now uses DriveTap to track supervised driving practice — automatic drive logging, night-hour tracking, and state-ready records.`,
+    "",
+    appLine,
+    "2. Create the student's account (takes about a minute)",
+    `3. Reply with the student's name and the Account # shown in the app's Settings, and we'll link them to ${org.name}`,
+    "----------------------------------------",
+    "",
+    "Send us those Account #s and we'll have every student enrolled the same day.",
+    "",
+    "— DriveTap",
+  ].join("\n");
+  return `mailto:${encodeURIComponent(org.contactEmail || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+function partnerCard(org, host, config = {}) {
   const card = el("div", { class: "card" },
     el("div", { style: "display:flex; justify-content:space-between; align-items:start" },
       el("div", {},
@@ -333,6 +455,21 @@ function partnerCard(org, host) {
       el("dt", {}, "Seats"), el("dd", {}, `${org.seatsUsed ?? 0} used of ${org.seats ?? 0}`),
       el("dt", {}, "Price"), el("dd", {}, org.pricePerSeat ? `${fmtMoney(org.pricePerSeat)}/seat/mo · ${fmtMoney((org.seats || 0) * org.pricePerSeat)}/mo` : "not set"),
       el("dt", {}, "Portal staff"), el("dd", {}, (org.memberEmails || []).length ? (org.memberEmails || []).join(", ") : "none — portal locked"),
+    ),
+    el("div", { class: "toolbar", style: "margin-top:10px" },
+      el("button", {
+        class: "btn small",
+        onclick: async () => {
+          try {
+            await navigator.clipboard.writeText(portalURL());
+            toast("Portal link copied");
+          } catch {
+            prompt("Portal link:", portalURL());
+          }
+        },
+      }, "Copy portal link"),
+      el("a", { class: "btn small", href: loginInviteMailto(org) }, "✉️ Send login link"),
+      el("a", { class: "btn small", href: studentInviteMailto(org, (config.appStoreURL || "").trim()) }, "✉️ Student invite"),
     ),
     partnerEditBlock(org, host),
   );

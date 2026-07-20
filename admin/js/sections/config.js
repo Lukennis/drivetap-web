@@ -11,6 +11,7 @@ const KNOWN = [
   { key: "freeDriveLimit", type: "number", label: "Free drive limit", note: "Lifetime drives before paywall" },
   { key: "maxDailyCountedHours", type: "number", label: "Default daily counted-hours cap", note: "States without a verified cap" },
   { key: "reviewMinIntervalDays", type: "number", label: "Review prompt spacing (days)", note: "Minimum gap between rating asks" },
+  { key: "appStoreURL", type: "string", label: "App Store URL", note: "Used in school/student invite emails" },
   { key: "eulaURL", type: "string", label: "EULA URL", note: "" },
   { key: "privacyPolicyURL", type: "string", label: "Privacy policy URL", note: "" },
   { key: "termsOfServiceURL", type: "string", label: "Terms of service URL", note: "" },
