@@ -223,16 +223,19 @@ function controlsCard(user, closeDrawer) {
     );
   });
 
+  // NOTE: there is deliberately no "grant premium" control. The app decides
+  // unlimited access from StoreKit purchases, linked-account sharing, and the
+  // tester flag ONLY — a hand-set hasPremium/premiumSource is ignored by
+  // SubscriptionManager.hasUnlimitedAccess and overwritten by its next
+  // entitlement refresh. The tester flag is the real comp switch, exactly like
+  // the in-app admin panel.
   return el("div", { class: "card" },
     el("h3", {}, "Controls"),
-    el("p", { class: "card-sub" }, "Every action writes an audit entry, same as the in-app admin. Assigning a partner org lets that school's portal staff see this student's drives."),
+    el("p", { class: "card-sub" }, "Every action writes an audit entry, same as the in-app admin. Tester = free unlimited access (the app's comp switch). Assigning a partner org lets that school's portal staff see this student's drives."),
     el("div", { class: "toolbar" },
       user.isTester
-        ? action("Remove tester", { isTester: false }, "Tester flag removed (web)")
-        : action("Make tester", { isTester: true }, "Tester flag granted (web)"),
-      user.hasPremium && user.premiumSource === "admin"
-        ? action("Revoke premium grant", { hasPremium: false, premiumSource: null }, "Admin premium revoked (web)")
-        : action("Grant premium", { hasPremium: true, premiumSource: "admin" }, "Admin premium granted (web)"),
+        ? action("Remove free access (tester)", { isTester: false }, "Tester flag removed (web)")
+        : action("Grant free access (tester)", { isTester: true }, "Tester flag granted (web)"),
       user.isSuspended
         ? action("Unsuspend", { isSuspended: false }, "Account unsuspended (web)")
         : action("Suspend", { isSuspended: true }, "Account suspended (web)", true),
@@ -286,7 +289,9 @@ async function refreshNotes(card, user) {
     ...notes.map((n) =>
       el("div", { class: "check-row", style: "display:block" },
         el("div", { style: "display:flex; justify-content:space-between" },
-          el("strong", {}, n.adminName ?? "Admin"),
+          // authorName is the iOS field; adminName covers notes written by
+          // early web-admin builds before the shapes were unified.
+          el("strong", {}, n.authorName ?? n.adminName ?? "Admin"),
           el("span", { class: "kpi-note" }, fmtDateTime(n.createdAt)),
         ),
         el("div", { html: escapeHTML(n.text ?? "") }),

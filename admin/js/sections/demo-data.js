@@ -79,6 +79,16 @@ const patterns = [
   { m: ["Roundabout", "Gradual curve", "Right turn", "Smooth acceleration"], cat: 4, kind: "city" },
 ];
 
+// Real encoded routes (Google polyline format, round-trip verified against
+// util.decodePolyline): an Austin neighborhood loop, a MoPac highway run, and
+// a Round Rock grid loop. GPS-recorded demo drives carry one so the drawer's
+// route map renders; manual entries have none — same as real data.
+const ROUTE_CITY_AUSTIN = "oeswD~p|sQcLsN_NkMkMwLwLsNwL{OgJoP{EwQsDwQoFsNgJsIsN_DkMrDwGjMwBnP~CvQfJvLvL~HrNnFrNjHnPrIzOjMzOjMnPvLrNjHjHbB";
+const ROUTE_HIGHWAY_MOPAC = "ohowDnrzsQod@gEsg@_Dsg@wBsg@oAsg@g@sg@f@sg@vBsg@fEsg@nFsg@nFsg@~Csg@nAsg@g@sg@kCsg@gE";
+const ROUTE_CITY_ROUND_ROCK = "_reyDv|dsQkHwLkHkMgJkMoKsIwLgEwLz@gJvGgEjMg@rNjCrNjHnKnKbGvLnAjMkCjMoFnK_DnFcB";
+// o2 students (Emma, Jack) practice in Round Rock; everyone else near Austin.
+const roundRockDrivers = new Set([8, 10]);
+
 const durations = [60, 45, 60, 30, 50, 55]; // minutes, cycled — TX-legal session sizes
 const weathers = ["Clear", "Sunny", "Partly Cloudy", "Clear", "Cloudy", "Clear", "Light Rain"];
 const supervisors = {
@@ -142,6 +152,10 @@ arcs.forEach(([userIdx, count], ai) => {
       dayMinutes: isNight ? 0 : durationMin,
       nightMinutes: isNight ? durationMin : 0,
       detectedManeuvers: isManual ? [] : pat.m,
+      routePolyline: isManual ? null
+        : pat.kind === "highway" ? ROUTE_HIGHWAY_MOPAC
+        : roundRockDrivers.has(userIdx) ? ROUTE_CITY_ROUND_ROCK
+        : ROUTE_CITY_AUSTIN,
       practiceCategoryId: isTexas ? pat.cat : null,
       supervisorName: supervisors[userIdx] ?? null,
       supervisorSignaturePNG: signed ? "demo" : null,
@@ -193,7 +207,9 @@ const broadcasts = [
 // B2B pipeline: Texas-first, $4.50/seat/month everywhere a price appears.
 const prospects = [
   { id: "p1", name: "Lone Star Driving Academy", contactName: "Rachel Kim", contactEmail: "rachel@lonestardriving.com", phone: "(512) 555-0187", city: "Austin, TX", students: 220, stage: "demo", nextAction: "Follow up after Thursday demo", nextActionDate: new Date(now + 2 * day), notes: "Loved the DES150N auto-fill. Asking about bulk pricing.", createdAt: new Date(now - 12 * day) },
-  { id: "p2", name: "Sunrise Driver Ed", contactName: "Marcus Webb", contactEmail: "marcus@sunrisedriver.com", phone: "(214) 555-0142", city: "Dallas, TX", students: 140, stage: "negotiating", nextAction: "Send revised quote (120 seats)", nextActionDate: new Date(now + 1 * day), notes: "Wants seat price under $4. Competitor quote in hand.", createdAt: new Date(now - 30 * day) },
+  // Deliberately overdue (nextActionDate in the past) so the pipeline's ⚠
+  // overdue treatment is always visible in a demo.
+  { id: "p2", name: "Sunrise Driver Ed", contactName: "Marcus Webb", contactEmail: "marcus@sunrisedriver.com", phone: "(214) 555-0142", city: "Dallas, TX", students: 140, stage: "negotiating", nextAction: "Send revised quote (120 seats)", nextActionDate: new Date(now - 2 * day), notes: "Wants seat price under $4. Competitor quote in hand.", createdAt: new Date(now - 30 * day) },
   { id: "p3", name: "Golden Gate Teen Driving", contactName: "Priya Shah", contactEmail: "priya@ggteendriving.com", phone: "(415) 555-0119", city: "San Francisco, CA", students: 310, stage: "lead", nextAction: "Intro call", nextActionDate: new Date(now + 5 * day), notes: "Inbound from the website.", createdAt: new Date(now - 3 * day) },
   { id: "p4", name: "Hill Country Driving Academy", contactName: "Dan Kovacs", contactEmail: "dan@hillcountrydriving.com", phone: "(512) 555-0173", city: "Austin, TX", students: 95, stage: "signed", nextAction: "Kickoff call Monday", nextActionDate: new Date(now + 3 * day), notes: "Signed 95 seats @ $4.50/mo. Round Rock location added as a second org.", createdAt: new Date(now - 60 * day) },
 ];
@@ -206,6 +222,21 @@ const quotes = [
 const partnerOrgs = [
   { id: "o1", name: "Hill Country Driving Academy", contactName: "Dan Kovacs", contactEmail: "dan@hillcountrydriving.com", memberEmails: ["dan@hillcountrydriving.com", "office@hillcountrydriving.com"], seats: 95, pricePerSeat: 4.5, status: "onboarding", signedAt: new Date(now - 8 * day), createdAt: new Date(now - 8 * day) },
   { id: "o2", name: "Hill Country Driving — Round Rock", contactName: "Dan Kovacs", contactEmail: "dan@hillcountrydriving.com", memberEmails: ["dan@hillcountrydriving.com"], seats: 40, pricePerSeat: 4.5, status: "live", signedAt: new Date(now - 30 * day), createdAt: new Date(now - 30 * day) },
+];
+
+// Seat requests raised from the school portal (same doc shape the portal's
+// "Request additional seats" button writes). One open request keeps the admin
+// queue exercisable in demos.
+const partnerRequests = [
+  { id: "r1", orgId: "o1", orgName: "Hill Country Driving Academy", type: "seats", quantity: 15, requestedByEmail: "office@hillcountrydriving.com", status: "open", createdAt: new Date(now - 2 * day) },
+  { id: "r2", orgId: "o2", orgName: "Hill Country Driving — Round Rock", type: "seats", quantity: 10, requestedByEmail: "dan@hillcountrydriving.com", status: "done", createdAt: new Date(now - 20 * day), resolvedAt: new Date(now - 19 * day) },
+];
+
+// Support notes — authorId/authorName is the same shape the iOS admin panel
+// writes (FirebaseService.addAdminNote).
+const adminNotes = [
+  { id: "n1", userId: "demo-user-0", text: "Family asked about transferring hours logged on paper — pointed them at the manual-entry flow.", authorId: "demo-admin", authorName: "Demo Admin", createdAt: new Date(now - 6 * day) },
+  { id: "n2", userId: "demo-user-4", text: "Rejected drive was a GPS glitch (2 mi in 3 min) — told them to re-log it.", authorId: "demo-admin", authorName: "Demo Admin", createdAt: new Date(now - 3 * day) },
 ];
 
 const onboarding = [
@@ -221,4 +252,4 @@ const onboarding = [
   { id: "t10", orgId: "o2", title: "Launch date confirmed", done: true, order: 5 },
 ];
 
-export const demoDataset = { users, trips, appConfig, audit, broadcasts, prospects, quotes, partnerOrgs, onboarding };
+export const demoDataset = { users, trips, appConfig, audit, broadcasts, prospects, quotes, partnerOrgs, onboarding, partnerRequests, adminNotes };

@@ -3,7 +3,19 @@
 // sections always reflect fresh cache state.
 import { initAuth } from "./auth.js";
 import { isDemo } from "./data.js";
-import { el, clear } from "./util.js";
+import { el, clear, toast } from "./util.js";
+
+// Demo-mode write blocks throw after already toasting their warning — swallow
+// them so a pitch demo never shows console errors. Anything else rejecting
+// unhandled is a real failure (e.g. a Firestore write that died mid-flow):
+// surface it as a toast so the admin is never left thinking a write landed.
+window.addEventListener("unhandledrejection", (event) => {
+  if (event.reason?.message === "demo-mode") {
+    event.preventDefault();
+    return;
+  }
+  toast(String(event.reason?.message || event.reason || "Something went wrong"), "error");
+});
 import { overviewSection } from "./sections/overview.js";
 import { usersSection } from "./sections/users.js";
 import { tripsSection } from "./sections/trips.js";

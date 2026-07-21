@@ -255,6 +255,7 @@ async function renderQuotes(container, host) {
 function printQuote(q) {
   const monthly = (q.seats || 0) * (q.pricePerSeat || 0) * (1 - (q.discountPct || 0) / 100);
   const win = window.open("", "_blank");
+  if (!win) { toast("Popup blocked — allow popups for this site to print quotes.", "warn"); return; }
   win.document.write(`<!DOCTYPE html><html><head><title>DriveTap Quote — ${q.schoolName ?? ""}</title>
     <style>
       body { font-family: -apple-system, Segoe UI, sans-serif; color: #10131a; max-width: 640px; margin: 48px auto; padding: 0 24px; }

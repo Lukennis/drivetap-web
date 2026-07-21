@@ -93,7 +93,7 @@ export async function loadBroadcasts() {
 }
 
 export async function loadNotes(userId) {
-  if (isDemo) return [];
+  if (isDemo) return demoDataset.adminNotes.filter((n) => n.userId === userId);
   const snap = await getDocs(query(collection(db, "adminUserNotes"), where("userId", "==", userId)));
   return snap.docs.map(snapToObj).sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0));
 }
@@ -154,9 +154,26 @@ export async function updateUserFields(userId, fields, auditDetail) {
   invalidate("users");
 }
 
+// Mirrors Trip.withStatus in the iOS app: an approval stamps approvedAt +
+// approvedBy (the acting admin's uid) and clears any rejection metadata, and
+// vice versa — so drives moderated here are indistinguishable from ones
+// moderated in the in-app admin panel.
 export async function updateTripStatus(trip, status) {
   guardWrite();
-  await updateDoc(doc(db, "trips", trip.id), { status, updatedAt: serverTimestamp() });
+  const adminId = session.adminUser?.id;
+  const fields = { status, updatedAt: serverTimestamp() };
+  if (status === "approved") {
+    fields.approvedAt = serverTimestamp();
+    fields.approvedBy = adminId ?? deleteField();
+    fields.rejectedAt = deleteField();
+    fields.rejectedBy = deleteField();
+  } else if (status === "rejected") {
+    fields.rejectedAt = serverTimestamp();
+    fields.rejectedBy = adminId ?? deleteField();
+    fields.approvedAt = deleteField();
+    fields.approvedBy = deleteField();
+  }
+  await updateDoc(doc(db, "trips", trip.id), fields);
   await logAction("trip_status", "trip", trip.id, `Status → ${status} (web admin)`);
   invalidate("trips");
   invalidate(`tripsUser:${trip.userId}`);
@@ -173,14 +190,16 @@ export async function saveConfigValues(values, auditDetail) {
   invalidate("appConfig");
 }
 
+// Field names match FirebaseService.addAdminNote (authorId/authorName) so the
+// iOS admin panel shows who wrote the note instead of falling back to "Admin".
 export async function addNote(userId, text) {
   guardWrite();
   const admin = session.adminUser;
   await addDoc(collection(db, "adminUserNotes"), {
     userId,
     text,
-    adminId: admin?.id ?? "unknown",
-    adminName: admin ? `${admin.firstName ?? ""} ${admin.lastName ?? ""}`.trim() || "Web admin" : "Web admin",
+    authorId: admin?.id ?? "unknown",
+    authorName: admin ? `${admin.firstName ?? ""} ${admin.lastName ?? ""}`.trim() || "Web admin" : "Web admin",
     createdAt: serverTimestamp(),
   });
 }
@@ -192,11 +211,15 @@ export async function deleteNote(noteId) {
 
 export async function createBroadcast({ title, body, segment }) {
   guardWrite();
+  const admin = session.adminUser;
   await addDoc(collection(db, "adminBroadcasts"), {
     title,
     body,
     segment,
     status: "queued",
+    // Same doc shape as FirebaseService.createAdminBroadcast on iOS.
+    createdBy: admin?.id ?? "unknown",
+    createdByName: admin ? `${admin.firstName ?? ""} ${admin.lastName ?? ""}`.trim() || "Web admin" : "Web admin",
     createdAt: serverTimestamp(),
   });
   await logAction("broadcast", "push", segment, `"${title}" → ${segment}`);
@@ -254,7 +277,7 @@ export async function savePartnerOrg(org) {
 }
 
 export async function loadPartnerRequests() {
-  if (isDemo) return [];
+  if (isDemo) return demoDataset.partnerRequests;
   return cached("partnerRequests", async () => {
     const snap = await getDocs(collection(db, "partnerRequests"));
     return snap.docs.map(snapToObj).sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0));
