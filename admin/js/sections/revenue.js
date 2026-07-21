@@ -21,12 +21,13 @@ const DEFAULT_PLAN_PRICES = {
   "drivetap.unlimited.yearly.t5": 37.95,
 };
 const BASE_PLAN = "drivetap.unlimited.yearly";
+// App Store Connect display names ("DriveTap Unlimited - 1 Teen", …).
 const PLAN_LABELS = {
-  "drivetap.unlimited.yearly": "1 teen",
-  "drivetap.unlimited.yearly.t2": "2 teens",
-  "drivetap.unlimited.yearly.t3": "3 teens",
-  "drivetap.unlimited.yearly.t4": "4 teens",
-  "drivetap.unlimited.yearly.t5": "5 teens",
+  "drivetap.unlimited.yearly": "DriveTap Unlimited — 1 Teen",
+  "drivetap.unlimited.yearly.t2": "DriveTap Unlimited — 2 Teens",
+  "drivetap.unlimited.yearly.t3": "DriveTap Unlimited — 3 Teens",
+  "drivetap.unlimited.yearly.t4": "DriveTap Unlimited — 4 Teens",
+  "drivetap.unlimited.yearly.t5": "DriveTap Unlimited — 5 Teens",
 };
 
 export const revenueSection = {
@@ -94,11 +95,12 @@ export const revenueSection = {
     const topStates = [...byState.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 8);
 
     clear(host).append(
+      el("p", { class: "card-sub", style: "margin:0 0 4px" }, "Consumer App Store revenue — DriveTap Unlimited yearly plans. School seat deals bill monthly per seat and live in Deals."),
       el("div", { class: "grid cols-4" },
-        kpi("Paying subscribers", String(paying.length), "StoreKit · testers/excluded removed"),
-        kpi("ARR (gross)", fmtMoney(arr), unattributed ? `${unattributed} payer${unattributed === 1 ? "" : "s"} unattributed → counted at base $9.99` : "exact, per stamped plan"),
-        kpi("MRR equivalent", fmtMoney(mrr), "ARR ÷ 12 — plans bill yearly"),
-        kpi("Paid conversion", fmtPct(real.length ? paying.length / real.length : 0, 1), `${granted.length} comp/linked premium excluded`),
+        kpi("Paying subscribers", String(paying.length), "App Store yearly plans · testers/excluded removed"),
+        kpi("ARR (gross)", fmtMoney(arr), unattributed ? `${unattributed} payer${unattributed === 1 ? "" : "s"} unattributed → counted at base $9.99/yr` : "exact, per stamped plan"),
+        kpi("MRR equivalent", fmtMoney(mrr), "ARR ÷ 12 — these plans bill yearly"),
+        kpi("Paid conversion", fmtPct(real.length ? paying.length / real.length : 0, 1), `${granted.length} comp/family-linked premium excluded`),
       ),
       el("div", { class: "grid cols-2" },
         el("div", { class: "card table-wrap" },

@@ -4,7 +4,7 @@
 import {
   loadDeals, saveDeal, deleteDeal, loadQuotes, saveQuote,
   loadPartnerOrgs, savePartnerOrg, loadOnboarding, saveOnboardingItem, invalidate,
-  loadPartnerRequests, resolvePartnerRequest, loadAppConfig,
+  loadPartnerRequests, resolvePartnerRequest, loadAppConfig, loadUsers,
 } from "../data.js";
 import { el, clear, fmtDate, fmtMoney, toDate, toast } from "../util.js";
 
@@ -151,7 +151,7 @@ function openDealDrawer(deal, host) {
                 const orgId = await savePartnerOrg({
                   name: d.name, contactName: d.contactName ?? "", contactEmail: contactEmail,
                   memberEmails: contactEmail ? [contactEmail] : [],
-                  seats: Number(d.students) || 0, seatsUsed: 0, pricePerSeat: 0,
+                  seats: Number(d.students) || 0, pricePerSeat: 0,
                   status: "onboarding", signedAt: new Date(), prospectId: d.id ?? savedId,
                 });
                 for (let i = 0; i < DEFAULT_ONBOARDING.length; i++) {
@@ -210,6 +210,7 @@ async function renderQuotes(container, host) {
     el("div", { class: "grid cols-2" },
       el("div", { class: "card" },
         el("h3", {}, "New quote"),
+        el("p", { class: "card-sub" }, "School seats bill monthly per seat — separate from the consumer app's yearly DriveTap Unlimited plans."),
         input("School name", "schoolName"),
         input("Contact name", "contactName"),
         input("Seats", "seats", "number", { min: "1" }),
@@ -274,9 +275,13 @@ function printQuote(q) {
       <tr><td class="total">Monthly total</td><td class="total" style="text-align:right">${fmtMoney(monthly)}</td></tr>
       <tr><td>Term</td><td style="text-align:right">${q.termMonths} months · ${fmtMoney(monthly * (q.termMonths || 1))}</td></tr>
     </table>
-    <p>Every seat includes automatic drive logging, skill detection, parent/instructor approvals, state-specific hour tracking, and official log exports.</p>
+    <p>Every seat includes the full DriveTap app for the student and their family: automatic GPS drive
+    logging, detection and grading of 23 driving maneuvers with a safety score for every drive,
+    parent/supervisor approvals with per-drive signatures, night-hour tracking, each state's hour
+    requirement built in (including the Texas 30-hour DES150N log with practice categories), and
+    DMV-ready record exports — plus the Partners portal for your staff.</p>
     ${q.notes ? `<p><em>${q.notes}</em></p>` : ""}
-    <p class="foot">Quote valid 30 days. DriveTap · ennisventures.com</p>
+    <p class="foot">Seats bill monthly per seat. Quote valid 30 days. DriveTap · ennisventures.com</p>
     <script>window.print()</` + `script></body></html>`);
   win.document.close();
 }
@@ -284,7 +289,14 @@ function printQuote(q) {
 // ---- Partners & onboarding -----------------------------------------------
 
 async function renderPartners(container, host) {
-  let [orgs, requests] = await Promise.all([loadPartnerOrgs(), loadPartnerRequests()]);
+  let [orgs, requests, allUsers] = await Promise.all([loadPartnerOrgs(), loadPartnerRequests(), loadUsers()]);
+
+  // Enrollment is DERIVED from reality — the students whose users.partnerOrgId
+  // points at the org — never from a stored counter that can drift.
+  const enrolledByOrg = new Map();
+  for (const u of allUsers) {
+    if (u.partnerOrgId) enrolledByOrg.set(u.partnerOrgId, (enrolledByOrg.get(u.partnerOrgId) || 0) + 1);
+  }
 
   // Self-heal orgs created before contact emails were auto-added to portal
   // access: any org with a contact email but an empty access list gets its
@@ -326,7 +338,7 @@ async function renderPartners(container, host) {
   ));
   pieces.push(orgs.length === 0
     ? el("div", { class: "card" }, el("h3", {}, "No partners yet"), el("p", { class: "card-sub" }, 'Use "+ New School", or move a pipeline deal to "Signed" — either way the org and onboarding checklist are created.'))
-    : el("div", { class: "grid cols-2" }, orgs.map((org) => partnerCard(org, host, config))));
+    : el("div", { class: "grid cols-2" }, orgs.map((org) => partnerCard(org, host, config, enrolledByOrg.get(org.id) || 0))));
   clear(container).append(...pieces);
 }
 
@@ -377,7 +389,7 @@ function openSchoolDrawer(host) {
             ].filter((e) => e.includes("@")))];
             const orgId = await savePartnerOrg({
               name: d.name.trim(), contactName: d.contactName ?? "", contactEmail,
-              memberEmails, seats: Number(d.seats) || 0, seatsUsed: 0,
+              memberEmails, seats: Number(d.seats) || 0,
               pricePerSeat: Number(d.pricePerSeat) || 0,
               status: d.status, signedAt: new Date(), prospectId: null,
             });
@@ -428,7 +440,7 @@ function studentInviteMailto(org, appStoreURL) {
     `Here's the note to forward to your students' families to get them onto DriveTap under ${org.name}:`,
     "",
     "----------------------------------------",
-    `${org.name} now uses DriveTap to track supervised driving practice — automatic drive logging, night-hour tracking, and state-ready records.`,
+    `${org.name} now uses DriveTap to track supervised driving practice — automatic GPS drive logging, night-hour tracking, supervisor signatures, and your state's official record forms (Texas families get the 30-hour DES150N log filled in automatically).`,
     "",
     appLine,
     "2. Create the student's account (takes about a minute)",
@@ -442,7 +454,7 @@ function studentInviteMailto(org, appStoreURL) {
   return `mailto:${encodeURIComponent(org.contactEmail || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-function partnerCard(org, host, config = {}) {
+function partnerCard(org, host, config = {}, enrolled = 0) {
   const card = el("div", { class: "card" },
     el("div", { style: "display:flex; justify-content:space-between; align-items:start" },
       el("div", {},
@@ -452,7 +464,7 @@ function partnerCard(org, host, config = {}) {
       el("span", { class: `badge ${org.status === "live" ? "green" : "orange"}` }, org.status ?? "onboarding"),
     ),
     el("dl", { class: "kv" },
-      el("dt", {}, "Seats"), el("dd", {}, `${org.seatsUsed ?? 0} used of ${org.seats ?? 0}`),
+      el("dt", {}, "Students"), el("dd", {}, `${enrolled} enrolled of ${org.seats ?? 0} seats`),
       el("dt", {}, "Price"), el("dd", {}, org.pricePerSeat ? `${fmtMoney(org.pricePerSeat)}/seat/mo · ${fmtMoney((org.seats || 0) * org.pricePerSeat)}/mo` : "not set"),
       el("dt", {}, "Portal staff"), el("dd", {}, (org.memberEmails || []).length ? (org.memberEmails || []).join(", ") : "none — portal locked"),
     ),
@@ -517,7 +529,8 @@ function renderChecklist(hostNode, org, items, host) {
   const addInput = el("input", { type: "text", placeholder: "Add step…", style: "flex:1" });
   clear(hostNode).append(
     el("p", { class: "card-sub" }, `Onboarding: ${done}/${items.length}`),
-    items.map((item) =>
+    // Native Node.append() stringifies arrays — spread, don't pass the array.
+    ...items.map((item) =>
       el("div", { class: `check-row${item.done ? " done" : ""}` },
         el("input", {
           type: "checkbox", ...(item.done ? { checked: "" } : {}),

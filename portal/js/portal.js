@@ -30,7 +30,7 @@ const authStatus = document.getElementById("auth-status");
 
 if (isDemo) {
   document.getElementById("demo-banner").classList.remove("hidden");
-  state.staffEmail = "dan@buckeyedriving.com";
+  state.staffEmail = "dan@hillcountrydriving.com";
   state.orgs = demoDataset.partnerOrgs.filter((o) => (o.memberEmails || []).includes(state.staffEmail));
   state.org = state.orgs[0];
   overlay.classList.add("hidden");
@@ -178,9 +178,9 @@ function renderPortal() {
   clear(host).append(
     el("div", { class: "grid cols-4" },
       kpi("Enrolled students", `${seatCount}`, seats ? `${seats - seatCount >= 0 ? seats - seatCount : 0} of ${seats} seats free` : "no seat cap set"),
-      kpi("Approved practice", fmtHours(totalSeconds), "across your roster"),
-      kpi("Goal reached", String(readyCount), "students at 100% of hours"),
-      kpi("Awaiting review", String(state.students.reduce((s, st) => s + studentStats(st).pendingCount, 0)), "drives pending approval"),
+      kpi("Approved practice", fmtHours(totalSeconds), "only approved drives count toward the state goal"),
+      kpi("Goal reached", String(readyCount), "students at 100% of their state's hours"),
+      kpi("Awaiting approval", String(state.students.reduce((s, st) => s + studentStats(st).pendingCount, 0)), "drives pending sign-off in the family's app"),
     ),
     rosterCard(),
     complianceCard(),
@@ -305,16 +305,33 @@ function progressRow(label, valueText, pct, night) {
 function complianceCard() {
   const rows = state.students.map((s) => ({ s, st: studentStats(s) }));
   const unsignedTotal = rows.reduce((sum, r) => sum + r.st.unsigned, 0);
+
+  // What the state actually requires of this roster, grouped by state — the
+  // goals come from each student's account, which the app fills from its
+  // verified per-state requirements table.
+  const byState = new Map();
+  for (const { s, st } of rows) {
+    const key = s.state || "No state set";
+    if (!byState.has(key)) byState.set(key, { count: 0, goal: st.goalHours, night: st.nightGoalHours });
+    byState.get(key).count += 1;
+  }
+  const requirementText = [...byState.entries()]
+    .map(([stateName, r]) =>
+      `${r.count} ${stateName} student${r.count === 1 ? "" : "s"} (${r.goal} h supervised${r.night ? ` incl. ${r.night} h night` : ""}${stateName === "Texas" ? " — logged on form DES150N" : ""})`)
+    .join(" · ");
+
   return el("div", { class: "card" },
     el("h3", {}, "Compliance & exports"),
+    state.students.length ? el("p", { class: "card-sub" }, `Your roster's state requirements: ${requirementText}.`) : null,
     el("p", { class: "card-sub" },
       unsignedTotal === 0
         ? "Every approved drive on your roster carries a supervisor signature."
-        : `${unsignedTotal} approved drive${unsignedTotal === 1 ? "" : "s"} across your roster still need a supervisor signature — families sign in their DriveTap app (one tap with a signature on file).`),
+        : `${unsignedTotal} approved drive${unsignedTotal === 1 ? "" : "s"} across your roster still need${unsignedTotal === 1 ? "s" : ""} a supervisor signature — families sign in their DriveTap app (one tap with a signature on file).`),
     el("div", { class: "toolbar" },
       el("button", { class: "btn small primary", onclick: exportRosterCSV }, "Export full roster (CSV)"),
       el("button", { class: "btn small", onclick: exportAllDrivesCSV }, "Export all drives (CSV)"),
     ),
+    el("p", { class: "card-sub" }, "CSVs are working records for your office. Official state forms — including the signed Texas 30-hour DES150N log — are generated inside each family's DriveTap app."),
   );
 }
 
@@ -411,7 +428,7 @@ function billingCard() {
       el("dt", {}, "Seats"), el("dd", {}, `${used} enrolled of ${seats || "∞"}`),
       el("dt", {}, "Price"), el("dd", {}, price ? `${fmtMoney(price)} per seat / month` : "per your agreement"),
       price ? el("dt", {}, "Monthly total") : null,
-      price ? el("dd", {}, fmtMoney(seats * price)) : null,
+      price ? el("dd", {}, `${fmtMoney(seats * price)} (${seats} contracted seats)`) : null,
     ),
     el("div", { class: "toolbar", style: "margin-top:10px" },
       el("span", { class: "kpi-note" }, "Request additional seats:"),

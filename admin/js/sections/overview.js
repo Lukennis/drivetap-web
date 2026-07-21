@@ -20,12 +20,12 @@ export const overviewSection = {
     const totalApprovedSeconds = approved.reduce((sum, t) => sum + (t.duration || 0), 0);
 
     const kpis = [
-      { label: "Total accounts", value: users.length, note: `${teens.length} drivers · ${users.length - teens.length} parents` },
+      { label: "Total accounts", value: users.length, note: `${teens.length} drivers (teen + standalone) · ${users.length - teens.length} parents` },
       { label: "Drives logged", value: trips.length, note: `${approved.length} approved · ${pending.length} pending` },
-      { label: "Approved practice", value: fmtHours(totalApprovedSeconds), note: "across all drivers" },
-      { label: "Paying subscribers", value: paying.length, note: "StoreKit, testers excluded" },
+      { label: "Approved practice", value: fmtHours(totalApprovedSeconds), note: "only approved drives count toward the goal" },
+      { label: "Paying subscribers", value: paying.length, note: "DriveTap Unlimited via the App Store, testers excluded" },
       { label: "Active drivers (7d)", value: activeThisWeek.size, note: "logged at least one drive" },
-      { label: "Pending review", value: pending.length, note: "waiting on a parent" },
+      { label: "Awaiting approval", value: pending.length, note: "drives not yet approved by a supervisor" },
     ];
 
     // Signups + drives per month for the trend charts.

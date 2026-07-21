@@ -1,7 +1,18 @@
 // Push broadcasts — writes the same adminBroadcasts docs the iOS composer
 // does; the sendAdminBroadcast Cloud Function fans them out and stamps status.
+//
+// Segment values are a contract with the function: all | teens | parents |
+// premium. "teens" targets the teen AND standalone roles (all drivers);
+// "premium" targets hasPremium == true (paid, granted, or family-linked).
 import { loadBroadcasts, createBroadcast, invalidate } from "../data.js";
 import { el, clear, fmtDateTime, toast } from "../util.js";
+
+const SEGMENT_LABELS = {
+  all: "Everyone",
+  teens: "Drivers (teens + standalone)",
+  parents: "Parents",
+  premium: "DriveTap Unlimited members",
+};
 
 export const broadcastsSection = {
   id: "broadcasts",
@@ -13,10 +24,10 @@ export const broadcastsSection = {
     const title = el("input", { type: "text", placeholder: "Notification title", maxlength: "60", style: "width:100%" });
     const body = el("textarea", { rows: 3, placeholder: "Message…", maxlength: "220" });
     const segment = el("select", {},
-      el("option", { value: "all" }, "Everyone"),
-      el("option", { value: "teens" }, "Teens / drivers"),
-      el("option", { value: "parents" }, "Parents"),
-      el("option", { value: "premium" }, "Premium users"),
+      el("option", { value: "all" }, SEGMENT_LABELS.all),
+      el("option", { value: "teens" }, SEGMENT_LABELS.teens),
+      el("option", { value: "parents" }, SEGMENT_LABELS.parents),
+      el("option", { value: "premium" }, `${SEGMENT_LABELS.premium} (paid, granted, or linked)`),
     );
 
     clear(host).append(
@@ -50,7 +61,7 @@ export const broadcastsSection = {
             el("tr", {},
               el("td", {}, fmtDateTime(b.createdAt)),
               el("td", {}, el("strong", {}, b.title ?? ""), el("div", { class: "kpi-note" }, b.body ?? "")),
-              el("td", {}, b.segment ?? "all"),
+              el("td", {}, SEGMENT_LABELS[b.segment] ?? b.segment ?? "Everyone"),
               el("td", {}, el("span", { class: `badge ${b.status === "sent" ? "green" : b.status === "failed" ? "red" : "orange"}` }, b.status ?? "queued")),
               el("td", {}, b.targeted != null ? `${b.delivered ?? 0}/${b.targeted}` : "—"),
             ),

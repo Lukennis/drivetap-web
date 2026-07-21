@@ -83,7 +83,7 @@ function draw(container, users) {
         id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email, role: u.role,
         state: u.state, premium: u.hasPremium ? "yes" : "no", premiumSource: u.premiumSource ?? "",
         tester: u.isTester ? "yes" : "no", suspended: u.isSuspended ? "yes" : "no",
-        lifetimeTrips: u.lifetimeTripCount ?? 0, created: fmtDate(u.createdAt),
+        lifetimeDrives: u.lifetimeTripCount ?? 0, created: fmtDate(u.createdAt),
       }))),
     }, `Export CSV (${rows.length})`),
   );
@@ -96,7 +96,7 @@ function draw(container, users) {
       el("thead", {}, el("tr", {},
         el("th", {}, ""),
         header("Name", "name"), header("Role", "role"), header("State", "state"),
-        el("th", {}, "Flags"), header("Trips", "trips"), header("Joined", "createdAt"),
+        el("th", {}, "Flags"), header("Drives", "trips"), header("Joined", "createdAt"),
       )),
       el("tbody", {}, rows.slice(0, 400).map((u) =>
         el("tr", { class: "clickable", onclick: (e) => { if (e.target.type !== "checkbox") openUserDrawer(u); } },
@@ -170,8 +170,8 @@ async function openUserDrawer(user) {
         kv("Account #", user.displayAccountId ?? "—"),
         kv("Invite code", user.inviteCode ?? "—"),
         kv("Joined", fmtDate(user.createdAt)),
-        kv("Goal", `${user.requiredHoursGoal ?? "?"}h total · ${user.requiredNightHoursGoal ?? "?"}h night`),
-        kv("Lifetime trips", String(user.lifetimeTripCount ?? 0)),
+        kv("State goal", `${user.requiredHoursGoal ?? "?"}h supervised · ${user.requiredNightHoursGoal ?? "?"}h night`),
+        kv("Lifetime drives", String(user.lifetimeTripCount ?? 0)),
         kv("Premium", user.hasPremium ? `yes (${user.premiumSource ?? "unknown"})` : "no"),
       ),
     ),
@@ -242,11 +242,11 @@ function controlsCard(user, closeDrawer) {
 }
 
 function renderTrips(card, trips) {
-  clear(card).append(
-    el("h3", {}, `Drives (${trips.length})`),
-    trips.length === 0 ? el("p", { class: "card-sub" }, "No drives synced to the cloud for this user.") : null,
-    trips.slice(0, 25).map((t) => tripRow(t)),
-  );
+  // Native Node.append() stringifies arrays and nulls — build the child list.
+  const children = [el("h3", {}, `Drives (${trips.length})`)];
+  if (trips.length === 0) children.push(el("p", { class: "card-sub" }, "No drives synced to the cloud for this user."));
+  children.push(...trips.slice(0, 25).map((t) => tripRow(t)));
+  clear(card).append(...children);
 }
 
 function tripRow(t) {
@@ -282,7 +282,8 @@ async function refreshNotes(card, user) {
   const input = el("textarea", { rows: 2, placeholder: "Add a support note…" });
   clear(card).append(
     el("h3", {}, `Admin notes (${notes.length})`),
-    notes.map((n) =>
+    // Native Node.append() stringifies arrays — spread, don't pass the array.
+    ...notes.map((n) =>
       el("div", { class: "check-row", style: "display:block" },
         el("div", { style: "display:flex; justify-content:space-between" },
           el("strong", {}, n.adminName ?? "Admin"),
