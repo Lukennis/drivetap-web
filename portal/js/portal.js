@@ -14,12 +14,24 @@ import {
   collection, getDocs, query, where, addDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  el, clear, fmtDate, fmtDateTime, fmtHours, fmtMoney, fmtMiles, toDate, downloadCSV, toast,
+  el, clear, fmtDate, fmtDateTime, fmtHours, fmtMoney, fmtMiles, toDate, downloadCSV, toast, escapeHTML,
 } from "../../admin/js/util.js";
 import { demoDataset } from "../../admin/js/sections/demo-data.js";
 
 const isDemo = new URLSearchParams(location.search).has("demo");
 const state = { org: null, orgs: [], students: [], tripsByStudent: new Map(), staffEmail: null };
+
+// Same contract as the admin shell: a rejection nobody caught (a Firestore
+// write that died mid-flow) must surface as a toast, never vanish into the
+// console — a school clicking "Send request" has to know it didn't land.
+// "demo-mode" is the sentinel the shared data layer throws after toasting.
+window.addEventListener("unhandledrejection", (event) => {
+  if (event.reason?.message === "demo-mode") {
+    event.preventDefault();
+    return;
+  }
+  toast(String(event.reason?.message || event.reason || "Something went wrong"), "error");
+});
 
 const snapToObj = (snap) => ({ id: snap.id, ...snap.data() });
 
@@ -32,7 +44,10 @@ if (isDemo) {
   document.getElementById("demo-banner").classList.remove("hidden");
   state.staffEmail = "dan@hillcountrydriving.com";
   state.orgs = demoDataset.partnerOrgs.filter((o) => (o.memberEmails || []).includes(state.staffEmail));
-  state.org = state.orgs[0];
+  // Same school-switcher memory as the signed-in path — a demo that forgets
+  // which location you were on across a reload reads as a bug on stage.
+  const remembered = localStorage.getItem(`dt-portal-org-${state.staffEmail}`);
+  state.org = state.orgs.find((o) => o.id === remembered) || state.orgs[0];
   overlay.classList.add("hidden");
   renderShellIdentity();
   loadRoster().then(renderPortal);
@@ -89,21 +104,20 @@ if (isDemo) {
 }
 
 async function loadRoster() {
+  const newestFirst = (a, b) => (toDate(b.startTime)?.getTime() || 0) - (toDate(a.startTime)?.getTime() || 0);
   if (isDemo) {
     state.students = demoDataset.users.filter((u) => u.partnerOrgId === state.org.id);
-    state.tripsByStudent = new Map(state.students.map((s) => [s.id, demoDataset.trips.filter((t) => t.userId === s.id)]));
-    return;
+    state.tripsByStudent = new Map(state.students.map((s) => [s.id, [...demoDataset.trips.filter((t) => t.userId === s.id)].sort(newestFirst)]));
+  } else {
+    const studentSnap = await getDocs(query(collection(db, "users"), where("partnerOrgId", "==", state.org.id)));
+    state.students = studentSnap.docs.map(snapToObj);
+    await Promise.all(state.students.map(async (s) => {
+      const tripSnap = await getDocs(query(collection(db, "trips"), where("userId", "==", s.id)));
+      state.tripsByStudent.set(s.id, tripSnap.docs.map(snapToObj).sort(newestFirst));
+    }));
   }
-  const studentSnap = await getDocs(query(collection(db, "users"), where("partnerOrgId", "==", state.org.id)));
-  state.students = studentSnap.docs.map(snapToObj)
-    .sort((a, b) => `${a.firstName}${a.lastName}`.localeCompare(`${b.firstName}${b.lastName}`));
-  await Promise.all(state.students.map(async (s) => {
-    const tripSnap = await getDocs(query(collection(db, "trips"), where("userId", "==", s.id)));
-    state.tripsByStudent.set(
-      s.id,
-      tripSnap.docs.map(snapToObj).sort((a, b) => (toDate(b.startTime)?.getTime() || 0) - (toDate(a.startTime)?.getTime() || 0)),
-    );
-  }));
+  // One sort for both sources — studentStats and lastDrive assume newest-first.
+  state.students.sort((a, b) => `${a.firstName ?? ""}${a.lastName ?? ""}`.localeCompare(`${b.firstName ?? ""}${b.lastName ?? ""}`));
 }
 
 function renderShellIdentity() {
@@ -149,7 +163,11 @@ function studentStats(student) {
   const approvedSeconds = approved.reduce((s, t) => s + (t.duration || 0), 0);
   const nightMinutes = approved.reduce((s, t) => s + (t.nightMinutes || 0), 0);
   const unsigned = approved.filter((t) => !(t.supervisorSignaturePNG || "").length).length;
-  const goalHours = student.requiredHoursGoal || 50;
+  // Missing goals fall back to the iOS parse defaults (AppUser 30 h / 10 h) so
+  // both surfaces describe the same student identically. An explicit 0 is a
+  // real value — some states (e.g. Arkansas) set no supervised-hour minimum —
+  // so it must survive, and the percent math must not divide by it.
+  const goalHours = student.requiredHoursGoal ?? 30;
   const nightGoalHours = student.requiredNightHoursGoal ?? 10;
   return {
     trips,
@@ -160,7 +178,7 @@ function studentStats(student) {
     unsigned,
     goalHours,
     nightGoalHours,
-    pct: Math.min(approvedSeconds / 3600 / goalHours, 1),
+    pct: goalHours > 0 ? Math.min(approvedSeconds / 3600 / goalHours, 1) : 1,
     nightPct: nightGoalHours > 0 ? Math.min(nightMinutes / 60 / nightGoalHours, 1) : 1,
     lastDrive: trips.length ? toDate(trips[0].startTime) : null,
   };
@@ -215,11 +233,18 @@ function rosterCard() {
               el("td", {}, el("strong", {}, `${s.firstName ?? ""} ${s.lastName ?? ""}`.trim() || "(no name)")),
               el("td", {}, s.state ?? "—"),
               el("td", { style: "min-width:160px" },
-                el("div", { style: "display:flex; justify-content:space-between; font-size:11.5px" },
-                  el("span", {}, `${(st.approvedSeconds / 3600).toFixed(1)}h / ${st.goalHours}h`),
-                  el("span", {}, `${Math.round(st.pct * 100)}%`),
-                ),
-                el("div", { class: "progressbar" }, el("div", { style: `width:${st.pct * 100}%` })),
+                st.goalHours > 0
+                  ? [
+                      el("div", { style: "display:flex; justify-content:space-between; font-size:11.5px" },
+                        el("span", {}, `${(st.approvedSeconds / 3600).toFixed(1)}h / ${st.goalHours}h`),
+                        el("span", {}, `${Math.round(st.pct * 100)}%`),
+                      ),
+                      el("div", { class: "progressbar" }, el("div", { style: `width:${st.pct * 100}%` })),
+                    ]
+                  : [
+                      el("div", { style: "font-size:11.5px" }, `${(st.approvedSeconds / 3600).toFixed(1)}h logged`),
+                      el("span", { class: "kpi-note" }, "no state minimum"),
+                    ],
               ),
               el("td", { style: "min-width:120px" },
                 st.nightGoalHours > 0
@@ -251,15 +276,20 @@ function openStudent(student) {
   document.body.append(backdrop, drawer);
   function close() { backdrop.remove(); drawer.remove(); }
 
-  const name = `${student.firstName ?? ""} ${student.lastName ?? ""}`.trim();
+  const name = `${student.firstName ?? ""} ${student.lastName ?? ""}`.trim() || "(no name)";
+  const goalText = st.goalHours > 0
+    ? `goal ${st.goalHours}h total / ${st.nightGoalHours}h night`
+    : "no state supervised-hour minimum";
   drawer.append(
     el("div", { class: "drawer-head" },
-      el("div", {}, el("h2", {}, name), el("div", { class: "kpi-note" }, `${student.state ?? "no state"} · goal ${st.goalHours}h total / ${st.nightGoalHours}h night`)),
+      el("div", {}, el("h2", {}, name), el("div", { class: "kpi-note" }, `${student.state ?? "no state"} · ${goalText}`)),
       el("button", { class: "btn small", onclick: close }, "Close"),
     ),
     el("div", { class: "card" },
       el("h3", {}, "Progress"),
-      progressRow("Total supervised hours", `${(st.approvedSeconds / 3600).toFixed(1)}h of ${st.goalHours}h`, st.pct, false),
+      st.goalHours > 0
+        ? progressRow("Total supervised hours", `${(st.approvedSeconds / 3600).toFixed(1)}h of ${st.goalHours}h`, st.pct, false)
+        : el("p", { class: "card-sub" }, `${(st.approvedSeconds / 3600).toFixed(1)}h supervised logged — this state sets no supervised-hour minimum.`),
       st.nightGoalHours > 0 ? progressRow("Night hours", `${(st.nightMinutes / 60).toFixed(1)}h of ${st.nightGoalHours}h`, st.nightPct, true) : null,
       el("p", { class: "card-sub", style: "margin-top:8px" },
         `${st.approvedCount} approved drives · ${st.pendingCount} pending · ${st.unsigned} awaiting supervisor signature`),
@@ -287,6 +317,9 @@ function openStudent(student) {
           ),
         );
       }),
+      st.trips.length > 40
+        ? el("p", { class: "card-sub" }, `Showing the 40 most recent — the CSV export has all ${st.trips.length}.`)
+        : null,
     ),
   );
 }
@@ -317,7 +350,9 @@ function complianceCard() {
   }
   const requirementText = [...byState.entries()]
     .map(([stateName, r]) =>
-      `${r.count} ${stateName} student${r.count === 1 ? "" : "s"} (${r.goal} h supervised${r.night ? ` incl. ${r.night} h night` : ""}${stateName === "Texas" ? " — logged on form DES150N" : ""})`)
+      `${r.count} ${stateName} student${r.count === 1 ? "" : "s"} (${r.goal > 0
+        ? `${r.goal} h supervised${r.night ? ` incl. ${r.night} h night` : ""}`
+        : "no supervised-hour minimum"}${stateName === "Texas" ? " — logged on form DES150N" : ""})`)
     .join(" · ");
 
   return el("div", { class: "card" },
@@ -393,11 +428,20 @@ function exportStudentCSV(student) {
 
 function printStudentSummary(student) {
   const st = studentStats(student);
-  const name = `${student.firstName ?? ""} ${student.lastName ?? ""}`.trim();
+  const name = `${student.firstName ?? ""} ${student.lastName ?? ""}`.trim() || "(no name)";
+  // Names, states, and supervisor names are typed by families in the app —
+  // they are DATA and must be escaped before being written into this document.
   const rows = st.trips.filter((t) => t.status === "approved").map((t) =>
-    `<tr><td>${fmtDateTime(t.startTime)}</td><td>${Math.round((t.duration || 0) / 60)} min</td><td>${t.nightMinutes || 0} min</td><td>${(t.supervisorSignaturePNG || "").length ? (t.supervisorName || "signed") : "—"}</td></tr>`).join("");
+    `<tr><td>${fmtDateTime(t.startTime)}</td><td>${Math.round((t.duration || 0) / 60)} min</td><td>${t.nightMinutes || 0} min</td><td>${(t.supervisorSignaturePNG || "").length ? escapeHTML(t.supervisorName || "signed") : "—"}</td></tr>`).join("");
+  const goalLine = st.goalHours > 0
+    ? `${(st.approvedSeconds / 3600).toFixed(1)} approved hours of ${st.goalHours} required · ${(st.nightMinutes / 60).toFixed(1)} night hours of ${st.nightGoalHours} required`
+    : `${(st.approvedSeconds / 3600).toFixed(1)} approved supervised hours — no state supervised-hour minimum`;
   const win = window.open("", "_blank");
-  win.document.write(`<!DOCTYPE html><html><head><title>DriveTap Practice Record — ${name}</title>
+  if (!win) {
+    toast("Your browser blocked the summary window — allow pop-ups for this site and try again.", "warn");
+    return;
+  }
+  win.document.write(`<!DOCTYPE html><html><head><title>DriveTap Practice Record — ${escapeHTML(name)}</title>
     <style>
       body { font-family: -apple-system, Segoe UI, sans-serif; color: #10131a; max-width: 680px; margin: 40px auto; padding: 0 24px; }
       .head { display: flex; justify-content: space-between; border-bottom: 3px solid #00b2f0; padding-bottom: 12px; }
@@ -407,10 +451,10 @@ function printStudentSummary(student) {
       .foot { color: #5c6572; font-size: 11px; margin-top: 28px; }
     </style></head><body>
     <div class="head"><div class="mark">Drive<span>Tap</span> Practice Record</div><div>${new Date().toLocaleDateString()}</div></div>
-    <h2>${name}</h2>
-    <p>${student.state ?? ""} · ${(st.approvedSeconds / 3600).toFixed(1)} approved hours of ${st.goalHours} required · ${(st.nightMinutes / 60).toFixed(1)} night hours of ${st.nightGoalHours} required</p>
+    <h2>${escapeHTML(name)}</h2>
+    <p>${escapeHTML(student.state ?? "")} · ${goalLine}</p>
     <table><tr><th>Date</th><th>Duration</th><th>Night</th><th>Supervisor</th></tr>${rows}</table>
-    <p class="foot">Prepared for ${state.org.name} from DriveTap records. Approved supervised-practice sessions only. This summary is a practice record; official state log forms are generated with signatures in the family's DriveTap app.</p>
+    <p class="foot">Prepared for ${escapeHTML(state.org.name)} from DriveTap records. Approved supervised-practice sessions only. This summary is a practice record; official state log forms are generated with signatures in the family's DriveTap app.</p>
     <script>window.print()</` + `script></body></html>`);
   win.document.close();
 }
@@ -436,8 +480,8 @@ function billingCard() {
       el("button", {
         class: "btn small primary",
         onclick: async () => {
-          const quantity = Number(requestInput.value) || 0;
-          if (quantity < 1) return;
+          const quantity = Math.floor(Number(requestInput.value) || 0);
+          if (quantity < 1) { toast("Enter how many seats to add.", "warn"); return; }
           if (isDemo) { toast("Demo mode — writes are disabled.", "warn"); return; }
           try {
             await addDoc(collection(db, "partnerRequests"), {

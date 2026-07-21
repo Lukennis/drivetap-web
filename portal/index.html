@@ -12,17 +12,21 @@
     .portal-shell { max-width: 1100px; margin: 0 auto; padding: 0 20px 80px; }
     .portal-top {
       display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 10px 16px; /* phones: school + identity drop below the brand instead of forcing body scroll */
       padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 20px;
     }
     .portal-top .brand { padding: 0; }
+    .portal-top .top-side { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
     .org-name { font-size: 13px; color: var(--text-dim); text-align: right; }
+    .org-name select { max-width: min(320px, 82vw); }
     .org-name strong { display: block; color: var(--text); font-size: 15px; }
     .progressbar { background: var(--surface-2); border-radius: 6px; height: 9px; overflow: hidden; }
     .progressbar > div { background: var(--blue); height: 100%; }
     .progressbar.night > div { background: #5b5bd6; }
     .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- No Chart.js here on purpose: the portal renders progress bars and tables
+       only — don't make every school download a charting library it never runs. -->
 </head>
 <body>
   <div id="demo-banner" class="demo-banner hidden">DEMO DATA — sample school, sample students, writes disabled</div>
@@ -36,7 +40,7 @@
           <div class="brand-sub">Partners</div>
         </div>
       </div>
-      <div style="display:flex; align-items:center; gap:16px">
+      <div class="top-side">
         <div id="org-label" class="org-name"></div>
         <div id="identity"></div>
       </div>
